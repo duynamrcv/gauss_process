@@ -1,0 +1,10 @@
+# System configuration
+vehicle_length: 4.75 # m
+vehicle_width: 2.221 # m
+wheel_base: 2.95 # m
+
+# System limitation
+max_velocity: 1.5 # m/s
+max_steering: 40. # deg
+max_acceleration: 1.0 # m/s2
+max_rating: 45 # deg/s
