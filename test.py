@@ -1,72 +1,63 @@
-from scipy.optimize import minimize
+#!/usr/bin/env python3
+
+import torch
+import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
 
+from gp.models import GaussianProcess
+from gp.kernels import RBFKernel, WhiteNoiseKernel
 
-class GPR:
-    def __init__(self, optimize=True):
-        self.is_fit = False
-        self.train_X, self.train_y = None, None
-        self.params = {"l": 0.5, "sigma_f": 0.2}
-        self.optimize = optimize
+def secret_function(x, noise=0.0):
+    return torch.sin(x) + noise * torch.randn(x.shape)
 
-    def fit(self, X, y):
-        # store train data
-        self.train_X = np.asarray(X)
-        self.train_y = np.asarray(y)
-        self.is_fit = True
+def print_loss(gp):
+    print("loss", gp.loss().detach().numpy())
 
-    def predict(self, X):
-        if not self.is_fit:
-            print("GPR Model not fit yet.")
-            return
+def print_parameters(gp):
+    for name, value in gp.named_parameters():
+        print(name, value.detach().numpy())
 
-        X = np.asarray(X)
-        Kff = self.kernel(self.train_X, self.train_X)  # (N, N)
-        Kyy = self.kernel(X, X)  # (k, k)
-        Kfy = self.kernel(self.train_X, X)  # (N, k)
-        Kff_inv = np.linalg.inv(Kff + 1e-8 * np.eye(len(self.train_X)))  # (N, N)
+def plot_variance(gp, x, y, title=None, std_factor=1.0):
+    mu, std = gp(x, return_std=True)
+    std *= std_factor
+    
+    mu = mu.detach().numpy()
+    std = std.detach().numpy()
+    
+    x = x.numpy()
+    y = y.detach().numpy()
 
-        mu = Kfy.T.dot(Kff_inv).dot(self.train_y)
-        cov = Kyy - Kfy.T.dot(Kff_inv).dot(Kfy)
-        return mu, cov
+    plt.figure(figsize=(12, 6))
+    samples_plt, = plt.plot(
+        X.numpy(), Y.numpy(),
+        "bs", ms=4, label="Sampled points")
+    y_plt, = plt.plot(x, y, "k--", label="Ground truth")
+    mean_plt, = plt.plot(x, mu, "r", label="Estimate")
+    std_plt = plt.gca().fill_between(
+        x.flat, (mu - 3 * std).flat, (mu + 3 * std).flat,
+        color="#dddddd", label="Three standard deviations")
+    plt.axis([-4, 4, -2, 2])
+    plt.title("Gaussian Process Estimate" if title is None else title)
+    plt.legend(handles=[samples_plt, y_plt, mean_plt, std_plt])
+    plt.show()
 
-    # inefficient edition
-    '''
-    def gaussian_kernel(x1, x2, l=1.0, sigma_f=1.0):
-        m, n = x1.shape[0], x2.shape[0]
-        dist_matrix = np.zeros((m, n), dtype=float)
-        for i in range(m):
-            for j in range(n):
-                dist_matrix[i][j] = np.sum((x1[i] - x2[j]) ** 2)
-        return sigma_f ** 2 * np.exp(- 0.5 / l ** 2 * dist_matrix)
-    '''
-
-    # efficient edition
-    def kernel(self, x1, x2):
-        dist_matrix = np.sum(x1 ** 2, 1).reshape(-1, 1) + np.sum(x2 ** 2, 1) - 2 * np.dot(x1, x2.T)
-        return self.params["sigma_f"] ** 2 * np.exp(-0.5 / self.params["l"] ** 2 * dist_matrix)
+# Training data.
+X = 10 * torch.rand(40, 1) - 4
+X = torch.tensor(sorted(torch.cat([X] * 4))).reshape(-1, 1)
+Y = secret_function(X, noise=1e-1)
 
 
-def y(x, noise_sigma=0.0):
-    x = np.asarray(x)
-    y = np.cos(x) + np.random.normal(0, noise_sigma, size=x.shape)
-    return y.tolist()
+# Construct GP.
+k = RBFKernel() + WhiteNoiseKernel()
+gp = GaussianProcess(k)
+gp.set_data(X, Y)
+gp.fit()
 
+# Test data.
+x = torch.linspace(-4, 4, 20).reshape(-1, 1)
+y = secret_function(x)
 
-train_X = np.array([3, 1, 4, 5, 9]).reshape(-1, 1)
-train_y = y(train_X, noise_sigma=1e-4)
-test_X = np.arange(0, 10, 0.1).reshape(-1, 1)
-
-gpr = GPR()
-gpr.fit(train_X, train_y)
-mu, cov = gpr.predict(test_X)
-test_y = mu.ravel()
-uncertainty = 1.96 * np.sqrt(np.diag(cov))
-plt.figure()
-plt.title("l=%.2f sigma_f=%.2f" % (gpr.params["l"], gpr.params["sigma_f"]))
-plt.fill_between(test_X.ravel(), test_y + uncertainty, test_y - uncertainty, alpha=0.1)
-plt.plot(test_X, test_y, label="predict")
-plt.scatter(train_X, train_y, label="train", c="red", marker="x")
-plt.legend()
-plt.show()
+plot_variance(gp, x, y)
+print_loss(gp)
+print_parameters(gp)
